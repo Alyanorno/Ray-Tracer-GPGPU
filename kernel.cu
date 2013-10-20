@@ -10,6 +10,22 @@ __device__ float dot( float3 a, float3 b )
 {
 	return a.x * b.x + a.y * b.y + a.z * b.z;
 }
+__device__ float3 cross( float3 a, float3 b )
+{
+	a.x = a.y * b.z - a.z * b.y;
+	a.y = a.z * b.x - a.x * b.z;
+	a.z = a.x * b.y - a.y * b.x;
+	return a;
+}
+__device__ float determinant( float3 a, float3 b, float3 c )
+{
+	return	a.x * b.y * c.z + 
+		b.x * c.y * a.z + 
+		c.x * a.y * b.z -
+		c.x * b.y * c.x -
+		b.x * a.y * c.z -
+		a.x * c.y * b.z;
+}
 __device__ float length( float3 a )
 {
 	return sqrt( a.x * a.x + a.y * a.y + a.z * a.z );
@@ -17,6 +33,8 @@ __device__ float length( float3 a )
 __device__ float3 normalize( float3 a )
 {
 	float t = length( a );
+	if( t == 0 )
+		return a;
 	a.x = a.x / t;
 	a.y = a.y / t;
 	a.z = a.z / t;
@@ -89,6 +107,21 @@ __device__ Sphere make_sphere( float3 position, float3 color, float radius )
 	return s;
 }
 
+#define NUMBER_OF_TRIANGLES 1
+struct Triangle
+{
+	float3 point1, point2, point3, color;
+} __device__ triangles[ NUMBER_OF_TRIANGLES];
+__device__ Triangle make_triangle( float3 point1, float3 point2, float3 point3, float3 color )
+{
+	Triangle t;
+	t.point1 = point1;
+	t.point2 = point2;
+	t.point3 = point3;
+	t.color = color;
+	return t;
+}
+
 #define NUMBER_OF_LIGHTS 2
 struct Light
 {
@@ -103,7 +136,15 @@ __device__ Light make_light( float3 position, float radius )
 	return l;
 }
 
-
+__device__ bool IsNaN( float3 a )
+{
+	if( length(a) <= 0 )
+		return false;
+	else if( length(a) > 0 )
+		return false;
+	else
+		return true;
+}
 __device__ float3 LightRay( float3 origin, float3 normal, float3 material_color )
 {
 	float3 color = make_float3( 0, 0, 0 );
@@ -120,7 +161,7 @@ __device__ float3 LightRay( float3 origin, float3 normal, float3 material_color 
 		float3 direction = normalize( minus( lights[i].position, origin ) );
 
 		float fdot = dot( normal, direction );
-		if( fdot < 0 )
+		if( fdot <= 0 )
 			continue;
 
 		//Check for collision
@@ -129,11 +170,30 @@ __device__ float3 LightRay( float3 origin, float3 normal, float3 material_color 
 		{
 			float3 distance = minus( origin, spheres[l].position );
 
-			float fdot = -dot( distance, direction );
-			if( fdot < 0 )
+			float ftdot = -dot( distance, direction );
+			if( ftdot < 0 )
 				continue;
-			float det = fdot * fdot - dot( distance, distance ) + spheres[l].radius * spheres[l].radius;
+			float det = ftdot * ftdot - dot( distance, distance ) + spheres[l].radius * spheres[l].radius;
 			if( det < 0 )
+				continue;
+			collision = true;
+			break;
+		}
+		for( int l(0); l < NUMBER_OF_TRIANGLES; l++ )
+		{
+			float3 e1 = minus( triangles[l].point2, triangles[l].point1 );
+			float3 e2 = minus( triangles[l].point3, triangles[l].point1 );
+			float3 s = minus( origin, triangles[l].point1 );
+			float3 d = direction;
+
+			float t = 1 / determinant( fmul( d, -1 ), e1, e2 );
+			float3 result = make_float3(
+				determinant( s, e1, e2 ),
+				determinant( fmul( d, -1 ), s, e2 ),
+				determinant( fmul( d, -1 ), e1, s ) );
+			result = fmul( result, t );
+
+			if( result.y < 0 || result.z < 0 || result.y + result.z > 1 )
 				continue;
 			collision = true;
 			break;
@@ -156,7 +216,7 @@ __device__ float3 LightRay( float3 origin, float3 normal, float3 material_color 
 	}
 
 	// Ambient
-	float ambient = 0.1;
+	float ambient = 0.2;
 	color = plus( color, fmul( material_color, ambient ) );
 
 	return color;
@@ -195,7 +255,30 @@ __device__ float3 CastRay( float3 origin, float3 direction )
 				normal = normalize( fmul( minus( plus( origin, fmul( direction, max_distance ) ), spheres[l].position ), spheres[l].radius ) );
 			}
 		}
-	
+		for( int l(0); l < NUMBER_OF_TRIANGLES; l++ )
+		{
+			float3 e1 = minus( triangles[l].point2, triangles[l].point1 );
+			float3 e2 = minus( triangles[l].point3, triangles[l].point1 );
+			float3 s = minus( origin, triangles[l].point1 );
+			float3 d = direction;
+
+			float t = 1 / determinant( fmul( d, -1 ), e1, e2 );
+			float3 result = make_float3(
+				determinant( s, e1, e2 ),
+				determinant( fmul( d, -1 ), s, e2 ),
+				determinant( fmul( d, -1 ), e1, s ) );
+			result = fmul( result, t );
+
+			if( result.y < 0 || result.z < 0 || result.y + result.z > 1 )
+				continue;
+			else if( result.x < max_distance )
+			{
+				max_distance = result.x;
+				color = triangles[l].color;
+				normal = normalize( cross( e2, e1 ) );
+			}
+		}
+
 		bool hit = color.x + color.y + color.z > 0 ? true: false;
 
 		origin = plus( origin, fmul( direction, max_distance - 0.1f ) );
@@ -253,12 +336,14 @@ extern "C" void render_kernel( dim3 grid, dim3 block, uchar* output, uint width,
 
 __global__ void init( int number, float* vertexs, float* normals, float* textureCoordinates)
 {
-	lights[0] = make_light( make_float3( 100, -100, -200 ), 1000 );
-	lights[1] = make_light( make_float3( -200, -200, -200 ), 800 );
-
 	spheres[0] = make_sphere( make_float3( 100, 0, 0 ), make_float3( 1, 0, 0 ), 100 );
 	spheres[1] = make_sphere( make_float3( 0, 100, 0 ), make_float3( 0, 1, 0 ), 100 );
 	spheres[2] = make_sphere( make_float3( 150, 150, 0 ), make_float3( 0, 0, 1 ), 100 );
+
+	triangles[0] = make_triangle( make_float3( 100, 0, -100 ), make_float3( -100, 0, -100 ), make_float3( 120, 200, 0 ), make_float3( 0.5, 0.5, 0.5 ) );
+	
+	lights[0] = make_light( make_float3( 100, -100, -200 ), 1000 );
+	lights[1] = make_light( make_float3( -200, -200, -200 ), 800 );
 
 	model = make_model( number, vertexs, normals, textureCoordinates );
 }
