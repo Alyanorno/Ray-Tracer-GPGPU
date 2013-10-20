@@ -58,12 +58,28 @@ __device__ float3 minus( float3 a, float3 b )
 	return a;
 }
 
+
+struct Model
+{
+	int number;
+	float *vertexs, *normals, *textureCoordinates;
+} __device__ model;
+__device__ Model make_model( int number, float* vertexs, float* normals, float* textureCoordinates )
+{
+	Model m;
+	m.number = number;
+	m.vertexs = vertexs;
+	m.normals = normals;
+	m.textureCoordinates = textureCoordinates;
+	return m;
+}
+
 #define NUMBER_OF_SPHERES 3
 struct Sphere
 {
 	float3 position, color;
 	float radius;
-};
+} __device__ spheres[ NUMBER_OF_SPHERES ];
 __device__ Sphere make_sphere( float3 position, float3 color, float radius )
 {
 	Sphere s;
@@ -78,7 +94,7 @@ struct Light
 {
 	float3 position;
 	float radius;
-};
+} __device__ lights[ NUMBER_OF_LIGHTS ];
 __device__ Light make_light( float3 position, float radius )
 {
 	Light l;
@@ -87,12 +103,9 @@ __device__ Light make_light( float3 position, float radius )
 	return l;
 }
 
+
 __device__ float3 LightRay( float3 origin, float3 normal, float3 material_color )
 {
-	Light lights[ NUMBER_OF_LIGHTS ];
-	lights[0] = make_light( make_float3( 100, -100, -200 ), 1000 );
-	lights[1] = make_light( make_float3( -200, -200, -200 ), 800 );
-
 	float3 color = make_float3( 0, 0, 0 );
 	for( int i(0); i < NUMBER_OF_LIGHTS; i++ )
 	{
@@ -112,10 +125,6 @@ __device__ float3 LightRay( float3 origin, float3 normal, float3 material_color 
 
 		//Check for collision
 		bool collision = false;
-		Sphere spheres[ NUMBER_OF_SPHERES ];
-		spheres[0] = make_sphere( make_float3( 100, 0, 0 ), make_float3( 1, 0, 0 ), 100 );
-		spheres[1] = make_sphere( make_float3( 0, 100, 0 ), make_float3( 0, 1, 0 ), 100 );
-		spheres[2] = make_sphere( make_float3( 150, 150, 0 ), make_float3( 0, 0, 1 ), 100 );
 		for( int l(0); l < NUMBER_OF_SPHERES; l++ )
 		{
 			float3 distance = minus( origin, spheres[l].position );
@@ -160,11 +169,6 @@ __device__ float3 CastRay( float3 origin, float3 direction )
 	float reflection;
 	for( uint i(0); i < max_deapth; i++ )
 	{
-		Sphere spheres[ NUMBER_OF_SPHERES ];
-		spheres[0] = make_sphere( make_float3( 100, 0, 0 ), make_float3( 1, 0, 0 ), 100 );
-		spheres[1] = make_sphere( make_float3( 0, 100, 0 ), make_float3( 0, 1, 0 ), 100 );
-		spheres[2] = make_sphere( make_float3( 150, 150, 0 ), make_float3( 0, 0, 1 ), 100 );
-
 		float max_distance = 1000;
 
 		float3 color = make_float3( 0, 0, 0 );
@@ -203,11 +207,11 @@ __device__ float3 CastRay( float3 origin, float3 direction )
 		if( i == 0 )
 		{
 			result = color;
-			reflection = 0.5f;
+			reflection = 0.8f;
 		}
 		else
 		{
-			reflection = reflection * 0.5f;
+			reflection = reflection * 0.8f;
 			result = plus( result, fmul( color, reflection ) );
 		}
 
@@ -244,6 +248,23 @@ __global__ void render( uchar *output, uint width, uint height, float time )
 
 extern "C" void render_kernel( dim3 grid, dim3 block, uchar* output, uint width, uint height, float time )
 {
-	render<<< grid, block>>>( output, width, height, time );
+	render<<< grid, block >>>( output, width, height, time );
+}
+
+__global__ void init( int number, float* vertexs, float* normals, float* textureCoordinates)
+{
+	lights[0] = make_light( make_float3( 100, -100, -200 ), 1000 );
+	lights[1] = make_light( make_float3( -200, -200, -200 ), 800 );
+
+	spheres[0] = make_sphere( make_float3( 100, 0, 0 ), make_float3( 1, 0, 0 ), 100 );
+	spheres[1] = make_sphere( make_float3( 0, 100, 0 ), make_float3( 0, 1, 0 ), 100 );
+	spheres[2] = make_sphere( make_float3( 150, 150, 0 ), make_float3( 0, 0, 1 ), 100 );
+
+	model = make_model( number, vertexs, normals, textureCoordinates );
+}
+
+extern "C" void init_kernel( int number, float* vertexs, float* normals, float* textureCoordinates)
+{
+	init<<< dim3(1), dim3(1) >>>( number, vertexs, normals, textureCoordinates);
 }
 

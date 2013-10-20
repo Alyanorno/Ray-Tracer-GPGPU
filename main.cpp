@@ -42,6 +42,7 @@ void reshape( int x, int y );
 void timerEvent( int value );
 
 extern "C" void render_kernel( dim3 grid, dim3 block, uchar* output, uint width, uint height, float time );
+extern "C" void init_kernel( int number, float* vertexs, float* normals, float* textureCoordinates );
 
 struct Model
 {
@@ -59,7 +60,15 @@ struct Model
 	void LoadObj( std::string name );
 } model;
 
+std::vector< void* > kernel_resources;
 
+void ToKernel( std::vector<float>& v )
+{
+	float* t;
+	cudaMalloc( (void**)&t, v.size() * sizeof(float) );
+	cudaMemcpy( (void*)&v[0], t, v.size() * sizeof(float), cudaMemcpyDeviceToHost );
+	kernel_resources.push_back( t );
+}
 int main(int argc, char **argv)
 {
 	time = 0.f;
@@ -87,6 +96,12 @@ int main(int argc, char **argv)
 	cudaGraphicsGLRegisterBuffer( &cuda_pbo_resource, pbo, cudaGraphicsMapFlagsWriteDiscard );
 
 	model.LoadObj( "bth.obj" );
+
+	ToKernel( model._vertexs );
+	ToKernel( model._normals );
+	ToKernel( model._textureCoordinates );
+
+	init_kernel( model._number, &model._vertexs[0], &model._normals[0], &model._textureCoordinates[0] );
 
 	atexit(cleanup);
 	glutMainLoop();
@@ -130,6 +145,9 @@ void cleanup()
 
 	cudaGraphicsUnregisterResource(cuda_pbo_resource);
 	glDeleteBuffers(1, &pbo);
+
+	for each( void* t in kernel_resources )
+		cudaFree( t );
 }
 
 void keyboard(unsigned char key, int /*x*/, int /*y*/)
