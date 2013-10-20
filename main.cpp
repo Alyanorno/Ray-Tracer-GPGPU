@@ -1,7 +1,7 @@
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <math.h>
+#include <string>
+#include <vector>
+#include <fstream>
+#include <sstream>
 
 #include <Windows.h>
 
@@ -32,9 +32,8 @@ float rotate_x = 0.0, rotate_y = 0.0;
 
 float time;
 
+// callbacks
 void cleanup();
-
-// rendering callbacks
 void display();
 void keyboard( unsigned char key, int x, int y );
 void mouse( int button, int state, int x, int y );
@@ -43,6 +42,23 @@ void reshape( int x, int y );
 void timerEvent( int value );
 
 extern "C" void render_kernel( dim3 grid, dim3 block, uchar* output, uint width, uint height, float time );
+
+struct Model
+{
+	int _number;
+	std::vector<float> _vertexs, _normals, _textureCoordinates;
+
+	void Set( int number )
+	{
+		_number = number;
+		_vertexs.resize( number * 3 );
+		_normals.resize( number * 3 );
+		_textureCoordinates.resize( number * 2 );
+	}
+
+	void LoadObj( std::string name );
+} model;
+
 
 int main(int argc, char **argv)
 {
@@ -69,6 +85,8 @@ int main(int argc, char **argv)
 
 	// register this buffer object with CUDA
 	cudaGraphicsGLRegisterBuffer( &cuda_pbo_resource, pbo, cudaGraphicsMapFlagsWriteDiscard );
+
+	model.LoadObj( "bth.obj" );
 
 	atexit(cleanup);
 	glutMainLoop();
@@ -186,5 +204,74 @@ void motion(int x, int y)
 
 	mouse_old_x = x;
 	mouse_old_y = y;
+}
+
+void Tokenize( std::string line, std::vector< std::string >& result, char delim = ' ' )
+{
+	std::stringstream ss( line );
+	while( getline( ss, line, delim ) )
+		result.push_back( line );
+}
+void Model::LoadObj( std::string name )
+{
+	std::fstream in;
+	in.open( name.c_str(), std::ios::in );
+	if( !in.is_open() )
+		;
+
+	std::vector<float> vertexs, normals, textureCoordinates;
+	std::vector<unsigned int> faces;
+
+	while( !in.eof() )
+	{
+		std::string line;
+		getline( in, line );
+
+		if( !line.size() )
+			continue;
+
+		if( line[0] == 'v' ) {
+			std::vector< std::string > t;
+			Tokenize( line, t );
+			if( line[1] == 't' )
+				// Texture Coordinate
+				for( int i(1); i < t.size(); i++ )
+					textureCoordinates.push_back( stof( t[i] ) );
+			else if( line[1] == 'n' )
+				// Normal
+				for( int i(1); i < t.size(); i++ )
+					normals.push_back( stof( t[i] ) );
+			else
+				// Vertex
+				for( int i(1); i < t.size(); i++ )
+					vertexs.push_back( stof( t[i] ) );
+		} else if( line[0] == 'f' ) {
+			// Face
+			std::vector< std::string > t;
+			Tokenize( line, t );
+			for( int i(1); i < t.size(); i++ ) {
+				std::vector< std::string > y;
+				Tokenize( t[i], y, '/' );
+				if( y.size() != 3 ) //only supports triangles
+					;
+				for( int j(0); j < y.size(); j++ )
+					faces.push_back( stoi( y[j] ) );
+			}
+		}
+	}
+
+	in.close();
+
+	Set( faces.size() / 3 );
+	for( int i(0); i < faces.size() / 3; i++ )
+	{
+		for( int j(0); j < 3; j++ )
+		{
+			_vertexs[ i * 3 + j ] = vertexs[ ( faces[ i * 3 + 0 ] - 1 ) * 3 + j ];
+			_normals[ i * 3 + j ] = normals[ ( faces[ i * 3 + 2 ] - 1 ) * 3 + j ];
+		}
+		for( int j(0); j < 2; j++ )
+			_textureCoordinates[ i * 2 + j ] = textureCoordinates[ ( faces[ i * 3 + 1 ] - 1 ) * 2 + j ];
+	}
 }
 
