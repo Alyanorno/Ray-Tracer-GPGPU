@@ -41,32 +41,36 @@ void motion( int x, int y );
 void reshape( int x, int y );
 void timerEvent( int value );
 
-extern "C" void render_kernel( dim3 grid, dim3 block, uchar* output, uint width, uint height, float time );
-extern "C" void init_kernel( int number, float* vertexs, float* normals, float* textureCoordinates );
+extern "C"
+{
+	void render_kernel( dim3 grid, dim3 block, uchar* output, uint width, uint height, float time );
+	void init_kernel( int number, float* vertexs, float* normals, float* textureCoordinates );
+	void update_kernel( float time );
+}
 
 struct Model
 {
-	int _number;
-	std::vector<float> _vertexs, _normals, _textureCoordinates;
+	int number;
+	std::vector<float> vertexs, normals, textureCoordinates;
 
 	void Set( int number )
 	{
-		_number = number;
-		_vertexs.resize( number * 3 );
-		_normals.resize( number * 3 );
-		_textureCoordinates.resize( number * 2 );
+		number = number;
+		vertexs.resize( number * 3 );
+		normals.resize( number * 3 );
+		textureCoordinates.resize( number * 2 );
 	}
 
 	void LoadObj( std::string name );
 } model;
 
-std::vector< void* > kernel_resources;
+std::vector< float* > kernel_resources;
 
 void ToKernel( std::vector<float>& v )
 {
 	float* t;
 	cudaMalloc( (void**)&t, v.size() * sizeof(float) );
-	cudaMemcpy( (void*)&v[0], t, v.size() * sizeof(float), cudaMemcpyDeviceToHost );
+	cudaMemcpy( t, (void*)&v[0], v.size() * sizeof(float), cudaMemcpyDeviceToHost );
 	kernel_resources.push_back( t );
 }
 int main(int argc, char **argv)
@@ -80,10 +84,12 @@ int main(int argc, char **argv)
 	glutDisplayFunc( display );
 	glutKeyboardFunc( keyboard );
 	glutMotionFunc( motion );
-	glutReshapeFunc(reshape);
+	glutReshapeFunc( reshape );
 	glutTimerFunc( 10, timerEvent, 0 );
 
 	glewInit();
+
+	glDisable( GL_DEPTH_TEST );
 
 	cudaGLSetGLDevice(0);
 
@@ -97,11 +103,11 @@ int main(int argc, char **argv)
 
 	model.LoadObj( "bth.obj" );
 
-	ToKernel( model._vertexs );
-	ToKernel( model._normals );
-	ToKernel( model._textureCoordinates );
+	ToKernel( model.vertexs );
+//	ToKernel( model.normals );
+//	ToKernel( model.textureCoordinates );
 
-	init_kernel( model._number, &model._vertexs[0], &model._normals[0], &model._textureCoordinates[0] );
+	init_kernel( model.number, kernel_resources[0], NULL, NULL );
 
 	atexit(cleanup);
 	glutMainLoop();
@@ -114,6 +120,8 @@ void display()
 	size_t num_bytes;
 	cudaGraphicsResourceGetMappedPointer( (void **)&output, &num_bytes, cuda_pbo_resource );
 
+	update_kernel( time );
+
 	// call CUDA kernel, writing results to PBO
 	render_kernel( grid, block, output, width, height, time );
 
@@ -122,7 +130,6 @@ void display()
 	glClear( GL_COLOR_BUFFER_BIT );
 
 	// draw image from PBO
-	glDisable( GL_DEPTH_TEST );
 	glBindBuffer( GL_PIXEL_UNPACK_BUFFER, pbo );
 	glDrawPixels( width, height, GL_RGBA, GL_UNSIGNED_BYTE, 0 );
 	glBindBuffer( GL_PIXEL_UNPACK_BUFFER, 0 );
@@ -133,10 +140,10 @@ void display()
 	time += 0.01f;
 }
 
-void timerEvent(int value)
+void timerEvent( int value )
 {
 	glutPostRedisplay();
-	glutTimerFunc( 10, timerEvent,0 );
+	glutTimerFunc( 10, timerEvent, 0 );
 }
 
 void cleanup()
@@ -148,9 +155,11 @@ void cleanup()
 
 	for each( void* t in kernel_resources )
 		cudaFree( t );
+
+	cudaDeviceReset();
 }
 
-void keyboard(unsigned char key, int /*x*/, int /*y*/)
+void keyboard( unsigned char key, int, int )
 {
 	switch (key)
 	{
@@ -160,7 +169,7 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
 	}
 }
 
-void mouse(int button, int state, int x, int y)
+void mouse( int button, int state, int x, int y )
 {
 	if (state == GLUT_DOWN)
 	{
@@ -175,7 +184,7 @@ void mouse(int button, int state, int x, int y)
 	mouse_old_y = y;
 }
 
-void reshape(int x, int y)
+void reshape( int x, int y )
 {
 	width = x;
 	height = y;
@@ -204,7 +213,7 @@ void reshape(int x, int y)
 	cudaGraphicsGLRegisterBuffer( &cuda_pbo_resource, pbo, cudaGraphicsMapFlagsWriteDiscard );
 }
 
-void motion(int x, int y)
+void motion( int x, int y )
 {
 	float dx, dy;
 	dx = (float)(x - mouse_old_x);
@@ -235,9 +244,9 @@ void Model::LoadObj( std::string name )
 	std::fstream in;
 	in.open( name.c_str(), std::ios::in );
 	if( !in.is_open() )
-		;
+		throw std::string( "Failed to open file: " + name );
 
-	std::vector<float> vertexs, normals, textureCoordinates;
+	std::vector<float> t_vertexs, t_normals, t_textureCoordinates;
 	std::vector<unsigned int> faces;
 
 	while( !in.eof() )
@@ -254,15 +263,15 @@ void Model::LoadObj( std::string name )
 			if( line[1] == 't' )
 				// Texture Coordinate
 				for( int i(1); i < t.size(); i++ )
-					textureCoordinates.push_back( stof( t[i] ) );
+					t_textureCoordinates.push_back( stof( t[i] ) );
 			else if( line[1] == 'n' )
 				// Normal
 				for( int i(1); i < t.size(); i++ )
-					normals.push_back( stof( t[i] ) );
+					t_normals.push_back( stof( t[i] ) );
 			else
 				// Vertex
 				for( int i(1); i < t.size(); i++ )
-					vertexs.push_back( stof( t[i] ) );
+					t_vertexs.push_back( stof( t[i] ) );
 		} else if( line[0] == 'f' ) {
 			// Face
 			std::vector< std::string > t;
@@ -285,11 +294,11 @@ void Model::LoadObj( std::string name )
 	{
 		for( int j(0); j < 3; j++ )
 		{
-			_vertexs[ i * 3 + j ] = vertexs[ ( faces[ i * 3 + 0 ] - 1 ) * 3 + j ];
-			_normals[ i * 3 + j ] = normals[ ( faces[ i * 3 + 2 ] - 1 ) * 3 + j ];
+			vertexs[ i * 3 + j ] = t_vertexs[ ( faces[ i * 3 + 0 ] - 1 ) * 3 + j ];
+			normals[ i * 3 + j ] = t_normals[ ( faces[ i * 3 + 2 ] - 1 ) * 3 + j ];
 		}
 		for( int j(0); j < 2; j++ )
-			_textureCoordinates[ i * 2 + j ] = textureCoordinates[ ( faces[ i * 3 + 1 ] - 1 ) * 2 + j ];
+			textureCoordinates[ i * 2 + j ] = t_textureCoordinates[ ( faces[ i * 3 + 1 ] - 1 ) * 2 + j ];
 	}
 }
 
