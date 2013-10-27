@@ -240,6 +240,31 @@ __device__ float3 LightRay( float3 origin, float3 normal, float3 material_color 
 			collision = true;
 			break;
 		}
+		for( int l(0); l < model.number; )
+		{
+			float3 point1 = plus( make_float3( model.vertexs[l*3+0], model.vertexs[l*3+1], model.vertexs[l*3+2]), model.position );
+			++l;
+			float3 point2 = plus( make_float3( model.vertexs[l*3+0], model.vertexs[l*3+1], model.vertexs[l*3+2]), model.position );
+			++l;
+			float3 point3 = plus( make_float3( model.vertexs[l*3+0], model.vertexs[l*3+1], model.vertexs[l*3+2]), model.position );
+			++l;
+			float3 e1 = minus( point2, point1 );
+			float3 e2 = minus( point3, point1 );
+			float3 s = minus( origin, point1 );
+			float3 d = direction;
+
+			float t = 1 / determinant( fmul( d, -1 ), e1, e2 );
+			float3 result = make_float3(
+				determinant( s, e1, e2 ),
+				determinant( fmul( d, -1 ), s, e2 ),
+				determinant( fmul( d, -1 ), e1, s ) );
+			result = fmul( result, t );
+
+			if( result.y < 0 || result.z < 0 || result.y + result.z > 1 )
+				continue;
+			collision = true;
+			break;
+		}
 		if( collision )
 			continue;
 
@@ -317,6 +342,35 @@ __device__ float3 CastRay( float3 origin, float3 direction )
 				normal = normalize( cross( e2, e1 ) );
 			}
 		}
+		for( int l(0); l < model.number; )
+		{
+			float3 point1 = plus( make_float3( model.vertexs[l*3+0], model.vertexs[l*3+1], model.vertexs[l*3+2]), model.position );
+			++l;
+			float3 point2 = plus( make_float3( model.vertexs[l*3+0], model.vertexs[l*3+1], model.vertexs[l*3+2]), model.position );
+			++l;
+			float3 point3 = plus( make_float3( model.vertexs[l*3+0], model.vertexs[l*3+1], model.vertexs[l*3+2]), model.position );
+			++l;
+			float3 e1 = minus( point2, point1 );
+			float3 e2 = minus( point3, point1 );
+			float3 s = minus( origin, point1 );
+			float3 d = direction;
+
+			float t = 1 / determinant( fmul( d, -1 ), e1, e2 );
+			float3 result = make_float3(
+				determinant( s, e1, e2 ),
+				determinant( fmul( d, -1 ), s, e2 ),
+				determinant( fmul( d, -1 ), e1, s ) );
+			result = fmul( result, t );
+
+			if( result.y < 0 || result.z < 0 || result.y + result.z > 1 )
+				continue;
+			else if( result.x < max_distance )
+			{
+				max_distance = result.x;
+				color = make_float3( 0.8, 1, 1 );
+				normal = normalize( cross( e2, e1 ) );
+			}
+		}
 		for( int l(0); l < NUMBER_OF_PARTICLES; l++ )
 		{
 			float3 distance = minus( origin, particles[l].position );
@@ -337,38 +391,6 @@ __device__ float3 CastRay( float3 origin, float3 direction )
 				max_distance = fdistance;
 				color = make_float3( 0, 0.5f, 1 );
 				hit_particle = true;
-			}
-		}
-		for( int l(0); l < model.number; )
-		{
-			float3 point1 = make_float3( model.vertexs[l*3+0], model.vertexs[l*3+1], model.vertexs[l*3+2]);
-			point1 = plus( point1, model.position );
-			++l;
-			float3 point2 = make_float3( model.vertexs[l*3+0], model.vertexs[l*3+1], model.vertexs[l*3+2]);
-			point2 = plus( point2, model.position );
-			++l;
-			float3 point3 = make_float3( model.vertexs[l*3+0], model.vertexs[l*3+1], model.vertexs[l*3+2]);
-			point3 = plus( point3, model.position );
-			++l;
-			float3 e1 = minus( point2, point1 );
-			float3 e2 = minus( point3, point1 );
-			float3 s = minus( origin, point1 );
-			float3 d = direction;
-
-			float t = 1 / determinant( fmul( d, -1 ), e1, e2 );
-			float3 result = make_float3(
-				determinant( s, e1, e2 ),
-				determinant( fmul( d, -1 ), s, e2 ),
-				determinant( fmul( d, -1 ), e1, s ) );
-			result = fmul( result, t );
-
-			if( result.y < 0 || result.z < 0 || result.y + result.z > 1 )
-				continue;
-			else if( result.x < max_distance )
-			{
-				max_distance = result.x;
-				color = make_float3( 1, 1, 1 );
-				normal = normalize( cross( e2, e1 ) );
 			}
 		}
 
@@ -544,7 +566,7 @@ __global__ void init( int number, float* vertexs, float* normals, float* texture
 {
 	material = make_material( 0.8f, 0.2f, 0.4f, 0.4f );
 
-	model = make_model( number, vertexs, normals, textureCoordinates, make_float3( 0, 0, 0 ) );
+	model = make_model( number, vertexs, normals, textureCoordinates, make_float3( 200, -50, -50 ) );
 
 	spheres[0] = make_sphere( make_float3( 100, 0, 0 ), make_float3( 1, 0, 0 ), 100 );
 	spheres[1] = make_sphere( make_float3( 0, 100, 0 ), make_float3( 0, 1, 0 ), 100 );

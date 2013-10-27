@@ -52,15 +52,6 @@ struct Model
 {
 	int number;
 	std::vector<float> vertexs, normals, textureCoordinates;
-
-	void Set( int number )
-	{
-		number = number;
-		vertexs.resize( number * 3 );
-		normals.resize( number * 3 );
-		textureCoordinates.resize( number * 2 );
-	}
-
 	void LoadObj( std::string name );
 } model;
 
@@ -70,7 +61,7 @@ void ToKernel( std::vector<float>& v )
 {
 	float* t;
 	cudaMalloc( (void**)&t, v.size() * sizeof(float) );
-	cudaMemcpy( t, (void*)&v[0], v.size() * sizeof(float), cudaMemcpyDeviceToHost );
+	cudaMemcpy( t, (void*)&v[0], v.size() * sizeof(float), cudaMemcpyHostToDevice );
 	kernel_resources.push_back( t );
 }
 int main(int argc, char **argv)
@@ -101,7 +92,7 @@ int main(int argc, char **argv)
 	// register this buffer object with CUDA
 	cudaGraphicsGLRegisterBuffer( &cuda_pbo_resource, pbo, cudaGraphicsMapFlagsWriteDiscard );
 
-	model.LoadObj( "bth.obj" );
+	model.LoadObj( "a.obj" );
 
 	ToKernel( model.vertexs );
 //	ToKernel( model.normals );
@@ -289,7 +280,10 @@ void Model::LoadObj( std::string name )
 
 	in.close();
 
-	Set( faces.size() / 3 );
+	number = faces.size() / 3;
+	vertexs.resize( number * 3 );
+	normals.resize( number * 3 );
+	textureCoordinates.resize( number * 2 );
 	for( int i(0); i < faces.size() / 3; i++ )
 	{
 		for( int j(0); j < 3; j++ )
